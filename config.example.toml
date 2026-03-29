@@ -1,0 +1,13 @@
+# onionchat example configuration
+# Copy to your config directory if you need to override defaults.
+
+[tor]
+control_host = "127.0.0.1"
+control_port = 9051
+socks_host = "127.0.0.1"
+socks_port = 9050
+
+[app]
+onion_virtual_port = 17654
+log_level = "info"
+max_message_bytes = 4096

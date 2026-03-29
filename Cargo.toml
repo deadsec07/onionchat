@@ -1,0 +1,27 @@
+[package]
+name = "onionchat"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal, privacy-focused CLI chat over Tor onion services"
+license = "MIT"
+repository = "https://github.com/deadsec07/onionchat"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+directories = "5.0"
+hex = "0.4"
+hmac = "0.12"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+thiserror = "2.0"
+tokio = { version = "1.37", features = ["macros", "rt-multi-thread", "net", "io-util", "io-std", "signal", "sync", "time"] }
+tokio-socks = "0.5"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+tempfile = "3.10"
