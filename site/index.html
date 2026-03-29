@@ -30,9 +30,10 @@
           <article class="card">
             <h2>What It Does</h2>
             <ul>
+              <li>Signed invite export and import for direct contact exchange</li>
               <li>Direct peer-to-peer messaging over Tor onion services</li>
               <li>Persistent local identity and peer address book</li>
-              <li>Single-message send and simple interactive terminal chat</li>
+              <li>Single-message send, direct terminal chat, and invite-only groups</li>
               <li>Tor control-port integration with SAFECOOKIE support</li>
             </ul>
           </article>
@@ -40,8 +41,8 @@
           <article class="card">
             <h2>What It Does Not Do</h2>
             <ul>
-              <li>No group chat</li>
               <li>No file transfer</li>
+              <li>No public discovery or username lookup</li>
               <li>No cloud backend</li>
               <li>No telemetry, analytics, or tracking</li>
             </ul>
@@ -53,10 +54,12 @@
           <p>Run a local Tor daemon with a SOCKS port and control port, then:</p>
           <pre><code>cargo build --release
 ./target/release/onionchat init
+./target/release/onionchat invite export --name alice --output alice-invite.json
 ./target/release/onionchat identity show
 ./target/release/onionchat listen</code></pre>
           <p>From another peer:</p>
-          <pre><code>./target/release/onionchat chat &lt;peer_onion&gt;</code></pre>
+          <pre><code>./target/release/onionchat invite import alice-invite.json
+./target/release/onionchat chat &lt;peer_onion&gt;</code></pre>
         </section>
 
         <section class="grid">

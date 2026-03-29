@@ -14,7 +14,6 @@ It is intentionally small:
 - No cloud backend
 - No telemetry
 - No GUI
-- No group chat
 - No file transfer
 
 The current MVP uses:
@@ -24,6 +23,8 @@ The current MVP uses:
 - `SAFECOOKIE` authentication when Tor offers it
 - Tor v3 onion services for inbound reachability
 - Tor SOCKS for outbound delivery
+- Signed invite export/import for contact exchange
+- Direct chat and invite-only group fan-out
 - A simple length-prefixed JSON message frame
 
 ## Status
@@ -38,6 +39,7 @@ What it tries to do:
 
 - Avoid account-based identity
 - Avoid centralized infrastructure
+- Keep contact discovery manual and explicit
 - Minimize local state
 - Avoid plaintext message logging by default
 - Keep the protocol and storage simple enough to audit
@@ -53,7 +55,8 @@ What it does not guarantee:
 Risks to understand:
 
 - Anyone with access to your machine can read local config and identity files
-- Peer onion addresses are stored locally in a minimal address book
+- Peer onion addresses and invite-derived contact metadata are stored locally
+- Group membership lists are stored locally
 - Traffic still depends on correct Tor configuration and a healthy Tor network
 - Terminal scrollback may expose message content on the local machine
 
@@ -64,6 +67,8 @@ Transport is deliberately small:
 - Outbound delivery uses Tor SOCKS to connect to `<peer>.onion:<virtual_port>`
 - Inbound reachability uses a Tor v3 onion service published through the control port
 - Each message is one TCP connection carrying one frame
+- Direct and group messages use the same frame format
+- Groups are invite-only local fan-out groups; there is no coordinator or server-side group state
 - Frame format is `4-byte big-endian length` + `JSON payload`
 
 Current JSON payload:
@@ -73,11 +78,14 @@ Current JSON payload:
   "version": 1,
   "from": "exampleexampleexampleexampleexampleexampleexampleexample.onion",
   "timestamp_unix": 1710000000,
-  "body": "hello"
+  "payload": {
+    "kind": "direct",
+    "body": "hello"
+  }
 }
 ```
 
-There is no delivery queue, message history sync, presence protocol, or group state.
+There is no delivery queue, message history sync, presence protocol, or decentralized discovery service.
 
 ## Tor Requirements
 
@@ -155,6 +163,7 @@ The app creates:
 - `config.toml`
 - `identity.json`
 - `peers.json`
+- `groups.json`
 
 Example config:
 
@@ -185,6 +194,30 @@ Show local identity:
 onionchat identity show
 ```
 
+Export a signed invite file:
+
+```bash
+onionchat invite export --name alice --output alice-invite.json
+```
+
+Import another person's invite:
+
+```bash
+onionchat invite import alice-invite.json
+```
+
+Save a peer manually:
+
+```bash
+onionchat peers add abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz2345.onion --name alice
+```
+
+List saved peers:
+
+```bash
+onionchat peers list
+```
+
 Listen for inbound messages:
 
 ```bash
@@ -210,6 +243,51 @@ onionchat chat abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz2345.on
 - Every line you type is sent as a separate Tor connection
 - The peer should be running either `listen` or `chat`
 
+Create an invite-only group from known peers:
+
+```bash
+onionchat groups create team \
+  abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz2345.onion \
+  bcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz23456.onion
+```
+
+List local groups:
+
+```bash
+onionchat groups list
+```
+
+Inspect a group's members:
+
+```bash
+onionchat groups show <group_id>
+```
+
+Send a one-off group message:
+
+```bash
+onionchat groups send <group_id> "hello team"
+```
+
+Run an interactive group chat session:
+
+```bash
+onionchat groups chat <group_id>
+```
+
+## Discovery Model
+
+`onionchat` does not implement public discovery, usernames, or a global directory.
+
+How people find each other:
+
+- They exchange signed invite files out of band
+- They share raw onion addresses manually
+- They add peers locally with `peers add`
+- They create groups only from peers already known locally
+
+This is deliberate. It avoids introducing a central server, public index, or discovery protocol that would add metadata leakage and abuse pressure.
+
 ## Local Demo
 
 Two peers can be tested on one machine if both use the same Tor daemon but separate config roots.
@@ -220,6 +298,7 @@ Terminal A:
 export ONIONCHAT_CONFIG_DIR=/tmp/onionchat-a
 cargo run -- init
 cargo run -- identity show
+cargo run -- invite export --name alice --output /tmp/alice-invite.json
 cargo run -- listen
 ```
 
@@ -229,10 +308,20 @@ Terminal B:
 export ONIONCHAT_CONFIG_DIR=/tmp/onionchat-b
 cargo run -- init
 cargo run -- identity show
+cargo run -- invite import /tmp/alice-invite.json
 cargo run -- chat <peer_a_onion>
 ```
 
 If you want bidirectional live chat, run `chat` on both sides and use each side's onion address.
+
+Minimal group demo:
+
+```bash
+export ONIONCHAT_CONFIG_DIR=/tmp/onionchat-b
+cargo run -- peers add <peer_a_onion> --name alice
+cargo run -- groups create duo <peer_a_onion>
+cargo run -- groups chat <group_id>
+```
 
 ## Logging
 
@@ -248,12 +337,14 @@ Set `RUST_LOG=onionchat=debug` for debugging. Message bodies are still not logge
 ## Limitations
 
 - No application-layer end-to-end encryption yet
+- No public discovery or searchable directory
 - No offline delivery
 - No message history synchronization
 - No NAT traversal outside Tor onion services
-- No authentication of peer identity beyond the onion address used
+- Invite signatures authenticate contact-card integrity, but direct messages are not yet signed end-to-end
 - Assumes reachable local Tor control and SOCKS ports
 - `SAFECOOKIE` and `NULL` auth are supported; password-authenticated control ports are not yet implemented
+- Group delivery is simple fan-out to each member and does not handle membership churn or acknowledgements
 
 If a Tor feature is missing locally, the app fails explicitly rather than pretending to work.
 

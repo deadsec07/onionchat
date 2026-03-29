@@ -18,6 +18,18 @@ pub enum Commands {
         #[command(subcommand)]
         command: IdentityCommands,
     },
+    Invite {
+        #[command(subcommand)]
+        command: InviteCommands,
+    },
+    Peers {
+        #[command(subcommand)]
+        command: PeerCommands,
+    },
+    Groups {
+        #[command(subcommand)]
+        command: GroupCommands,
+    },
     Listen,
     Send {
         peer_onion: String,
@@ -31,4 +43,36 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum IdentityCommands {
     Show,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum InviteCommands {
+    Export {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        output: Option<String>,
+    },
+    Import {
+        path: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PeerCommands {
+    Add {
+        peer_onion: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GroupCommands {
+    Create { name: String, members: Vec<String> },
+    List,
+    Show { group_id: String },
+    Send { group_id: String, message: String },
+    Chat { group_id: String },
 }

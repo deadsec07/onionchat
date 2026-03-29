@@ -9,7 +9,7 @@ mod transport;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands, IdentityCommands};
+use cli::{Cli, Commands, GroupCommands, IdentityCommands, InviteCommands, PeerCommands};
 use config::AppConfig;
 use identity::Identity;
 use storage::Storage;
@@ -34,6 +34,46 @@ async fn main() -> Result<()> {
                 println!("{}", identity.summary(&storage));
             }
         },
+        Commands::Invite { command } => {
+            let identity = Identity::load(&storage)?;
+            match command {
+                InviteCommands::Export { name, output } => {
+                    chat::export_invite(&storage, &identity, name, output)?;
+                }
+                InviteCommands::Import { path } => {
+                    chat::import_invite(&storage, &path)?;
+                }
+            }
+        }
+        Commands::Peers { command } => match command {
+            PeerCommands::Add { peer_onion, name } => {
+                chat::add_peer(&storage, &peer_onion, name)?;
+            }
+            PeerCommands::List => {
+                chat::list_peers(&storage)?;
+            }
+        },
+        Commands::Groups { command } => {
+            let identity = Identity::load(&storage)?;
+            match command {
+                GroupCommands::Create { name, members } => {
+                    chat::create_group(&storage, name, members)?;
+                }
+                GroupCommands::List => {
+                    chat::list_groups(&storage)?;
+                }
+                GroupCommands::Show { group_id } => {
+                    chat::show_group(&storage, &group_id)?;
+                }
+                GroupCommands::Send { group_id, message } => {
+                    chat::send_group_message(&storage, &config, &identity, &group_id, &message)
+                        .await?;
+                }
+                GroupCommands::Chat { group_id } => {
+                    chat::interactive_group_chat(&storage, &config, &identity, &group_id).await?;
+                }
+            }
+        }
         Commands::Listen => {
             let identity = Identity::load(&storage)?;
             chat::listen(&storage, &config, &identity).await?;
