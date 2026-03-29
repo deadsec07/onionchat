@@ -2,6 +2,10 @@
 
 `onionchat` is a minimal, production-oriented, privacy-focused CLI chat application for direct peer-to-peer text exchange over Tor onion services.
 
+Project site:
+
+- GitHub Pages marketing site: `https://deadsec07.github.io/onionchat/`
+
 It is intentionally small:
 
 - No accounts

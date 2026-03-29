@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>onionchat | Private CLI chat over Tor</title>
+    <meta
+      name="description"
+      content="onionchat is a minimal, privacy-focused CLI chat app for direct peer-to-peer text exchange over Tor onion services."
+    >
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <p class="eyebrow">CLI-only. Tor-based. No accounts.</p>
+        <h1>Private chat for people who want less surface area.</h1>
+        <p class="hero-copy">
+          <strong>onionchat</strong> is a minimal Rust CLI for peer-to-peer text
+          chat over Tor onion services. No phone number. No email. No central server.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/deadsec07/onionchat">View Source</a>
+          <a class="button" href="https://github.com/deadsec07/onionchat/releases">Download Releases</a>
+        </div>
+      </header>
+
+      <main>
+        <section class="grid">
+          <article class="card">
+            <h2>What It Does</h2>
+            <ul>
+              <li>Direct peer-to-peer messaging over Tor onion services</li>
+              <li>Persistent local identity and peer address book</li>
+              <li>Single-message send and simple interactive terminal chat</li>
+              <li>Tor control-port integration with SAFECOOKIE support</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h2>What It Does Not Do</h2>
+            <ul>
+              <li>No group chat</li>
+              <li>No file transfer</li>
+              <li>No cloud backend</li>
+              <li>No telemetry, analytics, or tracking</li>
+            </ul>
+          </article>
+        </section>
+
+        <section class="card command-panel">
+          <h2>Quick Start</h2>
+          <p>Run a local Tor daemon with a SOCKS port and control port, then:</p>
+          <pre><code>cargo build --release
+./target/release/onionchat init
+./target/release/onionchat identity show
+./target/release/onionchat listen</code></pre>
+          <p>From another peer:</p>
+          <pre><code>./target/release/onionchat chat &lt;peer_onion&gt;</code></pre>
+        </section>
+
+        <section class="grid">
+          <article class="card">
+            <h2>Threat Model</h2>
+            <p>
+              onionchat reduces exposure by avoiding central infrastructure and routing
+              transport over Tor. It does not guarantee users are untrackable.
+            </p>
+            <p>
+              Timing analysis, endpoint compromise, OS compromise, Tor misconfiguration,
+              and user mistakes can still deanonymize users.
+            </p>
+          </article>
+
+          <article class="card">
+            <h2>Why It Stays Small</h2>
+            <p>
+              The project is intentionally narrow so the code stays readable, auditable,
+              and practical to distribute as a standalone binary.
+            </p>
+            <p>
+              The goal is a realistic MVP, not a kitchen-sink messenger.
+            </p>
+          </article>
+        </section>
+
+        <section class="card links">
+          <h2>Links</h2>
+          <ul>
+            <li><a href="https://github.com/deadsec07/onionchat">GitHub repository</a></li>
+            <li><a href="https://github.com/deadsec07/onionchat/releases">Release binaries</a></li>
+            <li><a href="https://github.com/deadsec07/onionchat/blob/main/README.md">README</a></li>
+            <li><a href="https://github.com/deadsec07/onionchat/blob/main/LICENSE">License</a></li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
