@@ -18,6 +18,7 @@
         <p class="hero-copy">
           <strong>onionchat</strong> is a minimal Rust CLI for peer-to-peer text
           chat over Tor onion services. No phone number. No email. No central server.
+          Linux, macOS, Windows, and Android via Termux.
         </p>
         <div class="actions">
           <a class="button primary" href="https://github.com/deadsec07/onionchat">View Source</a>
@@ -35,6 +36,7 @@
               <li>Persistent local identity and peer address book</li>
               <li>Single-message send, direct terminal chat, and invite-only groups</li>
               <li>Tor control-port integration with SAFECOOKIE support</li>
+              <li>Runs on Android through Termux without needing a native app rewrite</li>
             </ul>
           </article>
 
@@ -60,6 +62,7 @@
           <p>From another peer:</p>
           <pre><code>./target/release/onionchat invite import alice-invite.json
 ./target/release/onionchat chat &lt;peer_onion&gt;</code></pre>
+          <p>Android support is currently through Termux with a local Tor process.</p>
         </section>
 
         <section class="grid">

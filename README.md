@@ -131,11 +131,45 @@ Binary output:
 target\release\onionchat.exe
 ```
 
+### Android via Termux
+
+`onionchat` can run on Android through Termux. This is the recommended Android path for now.
+
+Install toolchain and build inside Termux:
+
+```bash
+pkg update
+pkg install rust clang pkg-config tor
+cargo build --release
+```
+
+Binary output:
+
+```bash
+target/release/onionchat
+```
+
+Run Tor locally inside Termux in another session:
+
+```bash
+tor
+```
+
+Then use `onionchat` the same way as on Linux:
+
+```bash
+./target/release/onionchat init
+./target/release/onionchat identity show
+./target/release/onionchat listen
+```
+
 Notes:
 
 - The binary is a single Rust executable.
 - "Static-ish" distribution is the goal; exact linkage depends on target platform and toolchain.
 - For fully static Linux builds, target musl separately if desired.
+- Android support is currently Termux-first, not a native Android app.
+- Long-running background use on Android is less reliable than desktop because the OS may suspend or kill processes.
 
 Example:
 
@@ -151,6 +185,7 @@ Default config location is platform-specific:
 - Linux: `~/.config/onionchat/config.toml`
 - macOS: `~/Library/Application Support/io.onionchat.onionchat/config.toml`
 - Windows: `%APPDATA%\onionchat\onionchat\config\config.toml` or equivalent platform-resolved config dir
+- Termux/Android: usually `$HOME/.config/onionchat/config.toml`
 
 You can override the whole config root for testing:
 
@@ -323,6 +358,28 @@ cargo run -- groups create duo <peer_a_onion>
 cargo run -- groups chat <group_id>
 ```
 
+## Android Notes
+
+The Android support model is currently:
+
+- Run `onionchat` inside Termux
+- Run a local Tor process inside Termux
+- Exchange invites or onion addresses manually
+
+What to expect:
+
+- Direct messaging works with the same CLI model as desktop
+- Invite import/export works normally
+- Group chat works, but each message is still faned out peer-by-peer
+- Persistent inbound listening on Android is less reliable if the OS suspends Termux
+
+What is not implemented:
+
+- No native Android UI
+- No foreground-service wrapper
+- No Orbot integration
+- No background-resilient Android service model
+
 ## Logging
 
 Defaults are privacy-oriented:
@@ -345,6 +402,7 @@ Set `RUST_LOG=onionchat=debug` for debugging. Message bodies are still not logge
 - Assumes reachable local Tor control and SOCKS ports
 - `SAFECOOKIE` and `NULL` auth are supported; password-authenticated control ports are not yet implemented
 - Group delivery is simple fan-out to each member and does not handle membership churn or acknowledgements
+- Android support currently assumes a Termux environment and a locally run Tor process
 
 If a Tor feature is missing locally, the app fails explicitly rather than pretending to work.
 
