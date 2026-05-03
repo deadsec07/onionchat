@@ -2,7 +2,7 @@
 name = "onionchat"
 version = "0.1.0"
 edition = "2021"
-description = "Minimal, privacy-focused CLI chat over Tor onion services"
+description = "Minimal, privacy-focused CLI chat by A A Hasnat over Tor onion services"
 license = "MIT"
 repository = "https://github.com/deadsec07/onionchat"
 
