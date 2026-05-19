@@ -57,13 +57,22 @@ async fn main() -> Result<()> {
             let identity = Identity::load(&storage)?;
             match command {
                 GroupCommands::Create { name, members } => {
-                    chat::create_group(&storage, name, members)?;
+                    chat::create_group(&storage, &identity, name, members)?;
                 }
                 GroupCommands::List => {
                     chat::list_groups(&storage)?;
                 }
                 GroupCommands::Show { group_id } => {
                     chat::show_group(&storage, &group_id)?;
+                }
+                GroupCommands::Export { group_id, output } => {
+                    chat::export_group(&storage, &identity, &group_id, output)?;
+                }
+                GroupCommands::Import { path } => {
+                    chat::import_group(&storage, &path)?;
+                }
+                GroupCommands::Update { group_id, members } => {
+                    chat::update_group_members(&storage, &identity, &group_id, members)?;
                 }
                 GroupCommands::Send { group_id, message } => {
                     chat::send_group_message(&storage, &config, &identity, &group_id, &message)

@@ -70,9 +70,31 @@ pub enum PeerCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum GroupCommands {
-    Create { name: String, members: Vec<String> },
+    Create {
+        name: String,
+        members: Vec<String>,
+    },
     List,
-    Show { group_id: String },
-    Send { group_id: String, message: String },
-    Chat { group_id: String },
+    Show {
+        group_id: String,
+    },
+    Export {
+        group_id: String,
+        #[arg(long)]
+        output: Option<String>,
+    },
+    Import {
+        path: String,
+    },
+    Update {
+        group_id: String,
+        members: Vec<String>,
+    },
+    Send {
+        group_id: String,
+        message: String,
+    },
+    Chat {
+        group_id: String,
+    },
 }

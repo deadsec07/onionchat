@@ -8,6 +8,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use x25519_dalek::{PublicKey as EncryptionPublicKey, StaticSecret};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identity {
@@ -17,6 +18,10 @@ pub struct Identity {
     pub signing_secret_key: String,
     #[serde(default)]
     pub signing_public_key: String,
+    #[serde(default)]
+    pub encryption_secret_key: String,
+    #[serde(default)]
+    pub encryption_public_key: String,
     pub created_at_unix: u64,
 }
 
@@ -28,11 +33,14 @@ impl Identity {
             .create_persistent_identity(config.app.onion_virtual_port)
             .await?;
         let (signing_secret_key, signing_public_key) = generate_signing_material();
+        let (encryption_secret_key, encryption_public_key) = generate_encryption_material();
         let identity = Self {
             service_id: created.service_id,
             private_key: created.private_key,
             signing_secret_key,
             signing_public_key,
+            encryption_secret_key,
+            encryption_public_key,
             created_at_unix: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -48,10 +56,20 @@ impl Identity {
             return Err(OnionChatError::MissingIdentity.into());
         }
         let mut identity: Identity = storage.read_json(&storage.paths.identity_file)?;
+        let mut changed = false;
         if identity.signing_secret_key.is_empty() || identity.signing_public_key.is_empty() {
             let (secret, public) = generate_signing_material();
             identity.signing_secret_key = secret;
             identity.signing_public_key = public;
+            changed = true;
+        }
+        if identity.encryption_secret_key.is_empty() || identity.encryption_public_key.is_empty() {
+            let (secret, public) = generate_encryption_material();
+            identity.encryption_secret_key = secret;
+            identity.encryption_public_key = public;
+            changed = true;
+        }
+        if changed {
             identity.save(storage)?;
         }
         Ok(identity)
@@ -81,11 +99,22 @@ impl Identity {
         Ok(base64::engine::general_purpose::STANDARD.encode(signature.to_bytes()))
     }
 
+    pub fn encryption_secret_key(&self) -> Result<StaticSecret> {
+        let secret = base64::engine::general_purpose::STANDARD
+            .decode(&self.encryption_secret_key)
+            .map_err(|_| OnionChatError::MessageEncryptionFailed)?;
+        let bytes: [u8; 32] = secret
+            .try_into()
+            .map_err(|_| OnionChatError::MessageEncryptionFailed)?;
+        Ok(StaticSecret::from(bytes))
+    }
+
     pub fn summary(&self, storage: &Storage) -> String {
         format!(
-            "onion: {}\nsigning_public_key: {}\nconfig_dir: {}\nidentity_file: {}",
+            "onion: {}\nsigning_public_key: {}\nencryption_public_key: {}\nconfig_dir: {}\nidentity_file: {}",
             self.onion_address(),
             self.signing_public_key,
+            self.encryption_public_key,
             storage.paths.root.display(),
             storage.paths.identity_file.display()
         )
@@ -100,6 +129,17 @@ fn generate_signing_material() -> (String, String) {
     (
         base64::engine::general_purpose::STANDARD.encode(signing_key.to_bytes()),
         base64::engine::general_purpose::STANDARD.encode(verify_key.to_bytes()),
+    )
+}
+
+fn generate_encryption_material() -> (String, String) {
+    let mut secret = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut secret);
+    let secret_key = StaticSecret::from(secret);
+    let public_key = EncryptionPublicKey::from(&secret_key);
+    (
+        base64::engine::general_purpose::STANDARD.encode(secret_key.to_bytes()),
+        base64::engine::general_purpose::STANDARD.encode(public_key.as_bytes()),
     )
 }
 
@@ -118,6 +158,8 @@ mod tests {
             private_key: "ED25519-V3:dummy".into(),
             signing_secret_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             signing_public_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            encryption_secret_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            encryption_public_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             created_at_unix: 123,
         };
         identity.save(&storage).unwrap();

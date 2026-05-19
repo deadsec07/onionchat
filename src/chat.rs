@@ -1,11 +1,12 @@
 use crate::config::AppConfig;
 use crate::error::OnionChatError;
 use crate::identity::Identity;
-use crate::storage::{now_unix, GroupRecord, Storage};
+use crate::storage::{now_unix, GroupRecord, PeerBook, Storage};
 use crate::tor::{ActiveOnionService, TorController};
 use crate::transport::{
-    read_frame, sanitize_label, sanitize_terminal, validate_peer_onion, verify_invite, write_frame,
-    ContactCard, InviteFile, MessageEnvelope, MessagePayload,
+    decrypt_message, encrypt_message, read_frame, sanitize_label, sanitize_terminal,
+    validate_peer_onion, verify_group_invite, verify_invite, verify_message, write_frame,
+    ContactCard, GroupInvite, GroupInviteFile, InviteFile, MessageEnvelope, MessagePayload,
 };
 use anyhow::{Context, Result};
 use std::fs;
@@ -63,9 +64,23 @@ pub async fn send_message(
     message: &str,
 ) -> Result<()> {
     let peer = validate_peer_onion(peer_onion)?;
-    remember_peer(storage, &peer, None, None, "manual")?;
+    remember_peer(storage, &peer, None, None, None, "manual")?;
 
-    let envelope = MessageEnvelope::direct(identity.onion_address(), message.to_string());
+    let peers = storage.load_peer_book()?;
+    let peer_record = peers
+        .find(&peer)
+        .ok_or_else(|| OnionChatError::MissingPeer(peer.clone()))?;
+    let encryption_public_key = peer_record
+        .encryption_public_key
+        .as_deref()
+        .ok_or_else(|| OnionChatError::MissingPeerEncryptionKey(peer.clone()))?;
+    let (nonce, ciphertext) = encrypt_message(
+        message,
+        &identity.encryption_secret_key()?,
+        encryption_public_key,
+    )?;
+    let mut envelope = MessageEnvelope::direct(identity.onion_address(), nonce, ciphertext);
+    envelope.sign(&identity.signing_key()?)?;
     send_envelope(config, &peer, &envelope).await?;
     println!("sent to {}.onion", peer);
     Ok(())
@@ -78,7 +93,7 @@ pub async fn interactive_chat(
     peer_onion: &str,
 ) -> Result<()> {
     let peer = validate_peer_onion(peer_onion)?;
-    remember_peer(storage, &peer, None, None, "manual")?;
+    remember_peer(storage, &peer, None, None, None, "manual")?;
 
     let shutdown = Arc::new(Notify::new());
     let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -159,6 +174,7 @@ pub fn export_invite(
         ),
         onion: identity.onion_address(),
         signing_public_key: identity.signing_public_key.clone(),
+        encryption_public_key: identity.encryption_public_key.clone(),
         created_at_unix: now_unix(),
     };
     let signature = identity.sign_bytes(&card.canonical_bytes()?)?;
@@ -182,6 +198,7 @@ pub fn import_invite(storage: &Storage, path: &str) -> Result<()> {
         &invite.card.onion,
         Some(invite.card.display_name.clone()),
         Some(invite.card.signing_public_key.clone()),
+        Some(invite.card.encryption_public_key.clone()),
         "invite",
     )?;
     println!(
@@ -193,7 +210,7 @@ pub fn import_invite(storage: &Storage, path: &str) -> Result<()> {
 
 pub fn add_peer(storage: &Storage, peer_onion: &str, name: Option<String>) -> Result<()> {
     let peer = validate_peer_onion(peer_onion)?;
-    remember_peer(storage, &peer, name, None, "manual")?;
+    remember_peer(storage, &peer, name, None, None, "manual")?;
     println!("saved {}.onion", peer);
     Ok(())
 }
@@ -212,7 +229,12 @@ pub fn list_peers(storage: &Storage) -> Result<()> {
     Ok(())
 }
 
-pub fn create_group(storage: &Storage, name: String, members: Vec<String>) -> Result<()> {
+pub fn create_group(
+    storage: &Storage,
+    identity: &Identity,
+    name: String,
+    members: Vec<String>,
+) -> Result<()> {
     let peers = storage.load_peer_book()?;
     let normalized_members = members
         .into_iter()
@@ -226,7 +248,12 @@ pub fn create_group(storage: &Storage, name: String, members: Vec<String>) -> Re
         .collect::<Result<Vec<_>>>()?;
 
     let mut groups = storage.load_group_book()?;
-    let group = groups.create_group(sanitize_display_name(name), normalized_members)?;
+    let group = groups.create_group(
+        sanitize_display_name(name),
+        identity.service_id.clone(),
+        identity.signing_public_key.clone(),
+        normalized_members,
+    )?;
     storage.save_group_book(&groups)?;
     println!("{}\t{}\t{}", group.id, group.name, group.members.join(","));
     Ok(())
@@ -240,7 +267,13 @@ pub fn list_groups(storage: &Storage) -> Result<()> {
     }
 
     for group in groups.groups {
-        println!("{}\t{}\t{}", group.id, group.name, group.members.len());
+        println!(
+            "{}\t{}\t{}\tr{}",
+            group.id,
+            group.name,
+            group.members.len(),
+            group.revision
+        );
     }
     Ok(())
 }
@@ -252,10 +285,174 @@ pub fn show_group(storage: &Storage, group_id: &str) -> Result<()> {
         .ok_or_else(|| OnionChatError::MissingGroup(group_id.to_string()))?;
     println!("id: {}", group.id);
     println!("name: {}", group.name);
+    if !group.owner.is_empty() {
+        println!("owner: {}.onion", group.owner);
+    }
+    println!("revision: {}", group.revision);
     println!("members:");
     for member in &group.members {
         println!("- {}.onion", member);
     }
+    Ok(())
+}
+
+pub fn export_group(
+    storage: &Storage,
+    identity: &Identity,
+    group_id: &str,
+    output: Option<String>,
+) -> Result<()> {
+    let mut groups = storage.load_group_book()?;
+    let group = groups
+        .find_mut(group_id)
+        .ok_or_else(|| OnionChatError::MissingGroup(group_id.to_string()))?;
+
+    if group.owner.is_empty() {
+        group.owner = identity.service_id.clone();
+        group.owner_signing_public_key = identity.signing_public_key.clone();
+        if !group.members.iter().any(|member| member == &group.owner) {
+            group.members.push(group.owner.clone());
+            group.members.sort();
+            group.members.dedup();
+        }
+        if group.revision == 0 {
+            group.revision = 1;
+        }
+    }
+
+    if group.owner != identity.service_id {
+        return Err(OnionChatError::NotGroupOwner.into());
+    }
+
+    let group = group.clone();
+
+    let invite_group = GroupInvite {
+        version: crate::transport::PROTOCOL_VERSION,
+        group_id: group.id.clone(),
+        group_name: group.name.clone(),
+        owner: group.owner.clone(),
+        owner_signing_public_key: group.owner_signing_public_key.clone(),
+        members: group.members.clone(),
+        revision: group.revision,
+        created_at_unix: group.created_at_unix,
+    };
+    let signature = identity.sign_bytes(&invite_group.canonical_bytes()?)?;
+    let invite = GroupInviteFile {
+        group: invite_group,
+        signature,
+    };
+    storage.save_group_book(&groups)?;
+
+    let file_name = format!("group-{}.json", group.id);
+    let path = output
+        .map(Into::into)
+        .unwrap_or_else(|| storage.paths.root.join(file_name));
+    let raw = serde_json::to_vec_pretty(&invite).context("failed to serialize group invite")?;
+    storage.write_atomic(&path, &raw)?;
+    println!("{}", path.display());
+    Ok(())
+}
+
+pub fn import_group(storage: &Storage, path: &str) -> Result<()> {
+    let raw = fs::read_to_string(path).with_context(|| format!("failed to read {}", path))?;
+    let invite: GroupInviteFile =
+        serde_json::from_str(&raw).context("failed to parse group invite json")?;
+    verify_group_invite(&invite)?;
+
+    let peers = storage.load_peer_book()?;
+    if let Some(owner_peer) = peers.find(&invite.group.owner) {
+        if let Some(saved_key) = &owner_peer.signing_public_key {
+            if saved_key != &invite.group.owner_signing_public_key {
+                return Err(OnionChatError::GroupOwnerMismatch.into());
+            }
+        }
+    }
+
+    let mut members = invite.group.members.clone();
+    members.sort();
+    members.dedup();
+    let record = GroupRecord {
+        id: invite.group.group_id.clone(),
+        name: sanitize_display_name(invite.group.group_name.clone()),
+        members,
+        owner: invite.group.owner.clone(),
+        owner_signing_public_key: invite.group.owner_signing_public_key.clone(),
+        revision: invite.group.revision,
+        created_at_unix: invite.group.created_at_unix,
+    };
+
+    let mut groups = storage.load_group_book()?;
+    if let Some(existing) = groups.find(&record.id) {
+        if !existing.owner.is_empty() && existing.owner != record.owner {
+            return Err(OnionChatError::GroupOwnerMismatch.into());
+        }
+        if !existing.owner_signing_public_key.is_empty()
+            && existing.owner_signing_public_key != record.owner_signing_public_key
+        {
+            return Err(OnionChatError::GroupOwnerMismatch.into());
+        }
+        if record.revision <= existing.revision {
+            return Err(OnionChatError::StaleGroupRevision.into());
+        }
+    }
+    groups.upsert_group(record.clone());
+    storage.save_group_book(&groups)?;
+    println!(
+        "imported group {} ({}) revision {}",
+        record.name, record.id, record.revision
+    );
+    Ok(())
+}
+
+pub fn update_group_members(
+    storage: &Storage,
+    identity: &Identity,
+    group_id: &str,
+    members: Vec<String>,
+) -> Result<()> {
+    let peers = storage.load_peer_book()?;
+    let normalized_members = members
+        .into_iter()
+        .map(|member| {
+            let onion = validate_peer_onion(&member)?;
+            if peers.find(&onion).is_none() {
+                return Err(OnionChatError::MissingPeer(onion).into());
+            }
+            Ok(onion)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut groups = storage.load_group_book()?;
+    let group = groups
+        .find_mut(group_id)
+        .ok_or_else(|| OnionChatError::MissingGroup(group_id.to_string()))?;
+
+    if group.owner.is_empty() {
+        group.owner = identity.service_id.clone();
+        group.owner_signing_public_key = identity.signing_public_key.clone();
+        if group.revision == 0 {
+            group.revision = 1;
+        }
+    }
+    if group.owner != identity.service_id {
+        return Err(OnionChatError::NotGroupOwner.into());
+    }
+
+    let mut normalized = normalized_members;
+    normalized.push(group.owner.clone());
+    normalized.sort();
+    normalized.dedup();
+    group.members = normalized;
+    group.revision += 1;
+    let group = group.clone();
+    storage.save_group_book(&groups)?;
+    println!(
+        "{}\t{}\t{}\tr{}",
+        group.id,
+        group.name,
+        group.members.join(","),
+        group.revision
+    );
     Ok(())
 }
 
@@ -271,14 +468,8 @@ pub async fn send_group_message(
         .find(group_id)
         .cloned()
         .ok_or_else(|| OnionChatError::MissingGroup(group_id.to_string()))?;
-
-    let envelope = MessageEnvelope::group(
-        identity.onion_address(),
-        group.id.clone(),
-        group.name.clone(),
-        message.to_string(),
-    );
-    fan_out_group(config, &group, &envelope, &identity.service_id).await?;
+    let peers = storage.load_peer_book()?;
+    fan_out_group(config, &group, &peers, identity, message).await?;
     println!("sent to group {}", group.name);
     Ok(())
 }
@@ -375,7 +566,7 @@ async fn run_listener(
                 match read_frame(&mut socket, &config).await {
                     Ok(message) => {
                         if let Ok(peer) = validate_peer_onion(&message.from) {
-                            if let Err(error) = remember_peer(&storage, &peer, None, None, "inbound") {
+                            if let Err(error) = remember_peer(&storage, &peer, None, None, None, "inbound") {
                                 warn!("failed to update peer book: {error:#}");
                             }
                         }
@@ -393,25 +584,51 @@ async fn run_listener(
 
 fn print_incoming(storage: &Storage, message: &MessageEnvelope) -> Result<()> {
     let peers = storage.load_peer_book()?;
+    let groups = storage.load_group_book()?;
+    let identity = Identity::load(storage)?;
     let from_onion =
         validate_peer_onion(&message.from).unwrap_or_else(|_| sanitize_terminal(&message.from));
-    let from_label = peers
+    let peer = peers
         .find(&from_onion)
-        .and_then(|peer| peer.display_name.clone())
+        .ok_or_else(|| OnionChatError::MissingPeer(from_onion.clone()))?;
+    let signing_public_key = peer
+        .signing_public_key
+        .as_deref()
+        .ok_or_else(|| OnionChatError::MissingPeer(from_onion.clone()))?;
+    verify_message(message, signing_public_key)?;
+    let from_label = peer
+        .display_name
+        .clone()
         .unwrap_or_else(|| from_onion.clone());
+    let encryption_public_key = peer
+        .encryption_public_key
+        .as_deref()
+        .ok_or_else(|| OnionChatError::MissingPeerEncryptionKey(from_onion.clone()))?;
+    let identity_secret = identity.encryption_secret_key()?;
 
     match &message.payload {
-        MessagePayload::Direct { body } => {
-            println!("\n[{from_label}] {}", sanitize_terminal(body));
+        MessagePayload::Direct { nonce, ciphertext } => {
+            let body = decrypt_message(nonce, ciphertext, &identity_secret, encryption_public_key)?;
+            println!("\n[{from_label}] {}", sanitize_terminal(&body));
         }
         MessagePayload::Group {
-            group_name, body, ..
+            group_id,
+            group_name,
+            nonce,
+            ciphertext,
         } => {
+            let group = groups
+                .find(group_id)
+                .ok_or_else(|| OnionChatError::MissingGroup(group_id.clone()))?;
+            if !group.members.iter().any(|member| member == &from_onion) {
+                return Err(OnionChatError::UnauthorizedGroupSender(group_id.clone()).into());
+            }
+            let body = decrypt_message(nonce, ciphertext, &identity_secret, encryption_public_key)?;
             println!(
                 "\n[group:{}] [{}] {}",
                 sanitize_terminal(group_name),
                 from_label,
-                sanitize_terminal(body)
+                sanitize_terminal(&body)
             );
         }
     }
@@ -432,6 +649,7 @@ fn remember_peer(
     peer_onion: &str,
     name: Option<String>,
     signing_public_key: Option<String>,
+    encryption_public_key: Option<String>,
     source: &str,
 ) -> Result<()> {
     let mut peers = storage.load_peer_book()?;
@@ -439,6 +657,7 @@ fn remember_peer(
         peer_onion,
         name.map(sanitize_display_name),
         signing_public_key,
+        encryption_public_key,
         source,
     )?;
     peers.touch(peer_onion);
@@ -456,15 +675,40 @@ async fn send_envelope(config: &AppConfig, peer: &str, envelope: &MessageEnvelop
 async fn fan_out_group(
     config: &AppConfig,
     group: &GroupRecord,
-    envelope: &MessageEnvelope,
-    own_service_id: &str,
+    peers: &PeerBook,
+    identity: &Identity,
+    message: &str,
 ) -> Result<()> {
     let mut failures = Vec::new();
     for member in &group.members {
-        if member == own_service_id {
+        if member == &identity.service_id {
             continue;
         }
-        if let Err(error) = send_envelope(config, member, envelope).await {
+        let Some(peer) = peers.find(member) else {
+            failures.push(format!("{}.onion: missing peer", member));
+            continue;
+        };
+        let Some(encryption_public_key) = peer.encryption_public_key.as_deref() else {
+            failures.push(format!("{}.onion: missing peer encryption key", member));
+            continue;
+        };
+        let Ok((nonce, ciphertext)) = encrypt_message(
+            message,
+            &identity.encryption_secret_key()?,
+            encryption_public_key,
+        ) else {
+            failures.push(format!("{}.onion: message encryption failed", member));
+            continue;
+        };
+        let mut envelope = MessageEnvelope::group(
+            identity.onion_address(),
+            group.id.clone(),
+            group.name.clone(),
+            nonce,
+            ciphertext,
+        );
+        envelope.sign(&identity.signing_key()?)?;
+        if let Err(error) = send_envelope(config, member, &envelope).await {
             failures.push(format!("{}.onion: {error}", member));
         }
     }

@@ -127,6 +127,8 @@ pub struct PeerRecord {
     pub onion: String,
     pub display_name: Option<String>,
     pub signing_public_key: Option<String>,
+    #[serde(default)]
+    pub encryption_public_key: Option<String>,
     pub added_at_unix: u64,
     pub last_used_unix: u64,
     pub source: String,
@@ -137,6 +139,12 @@ pub struct GroupRecord {
     pub id: String,
     pub name: String,
     pub members: Vec<String>,
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub owner_signing_public_key: String,
+    #[serde(default = "default_group_revision")]
+    pub revision: u64,
     pub created_at_unix: u64,
 }
 
@@ -146,6 +154,7 @@ impl PeerBook {
         onion: &str,
         display_name: Option<String>,
         signing_public_key: Option<String>,
+        encryption_public_key: Option<String>,
         source: &str,
     ) -> Result<()> {
         let onion = validate_peer_onion(onion)?;
@@ -157,6 +166,9 @@ impl PeerBook {
             if signing_public_key.is_some() {
                 existing.signing_public_key = signing_public_key;
             }
+            if encryption_public_key.is_some() {
+                existing.encryption_public_key = encryption_public_key;
+            }
             existing.last_used_unix = now;
             existing.source = source.to_string();
             return Ok(());
@@ -166,6 +178,7 @@ impl PeerBook {
             onion,
             display_name,
             signing_public_key,
+            encryption_public_key,
             added_at_unix: now,
             last_used_unix: now,
             source: source.to_string(),
@@ -189,7 +202,13 @@ impl PeerBook {
 }
 
 impl GroupBook {
-    pub fn create_group(&mut self, name: String, members: Vec<String>) -> Result<GroupRecord> {
+    pub fn create_group(
+        &mut self,
+        name: String,
+        owner: String,
+        owner_signing_public_key: String,
+        members: Vec<String>,
+    ) -> Result<GroupRecord> {
         if members.is_empty() {
             return Err(OnionChatError::EmptyGroup.into());
         }
@@ -198,6 +217,8 @@ impl GroupBook {
             .into_iter()
             .map(|member| validate_peer_onion(&member))
             .collect::<Result<Vec<_>>>()?;
+        let owner = validate_peer_onion(&owner)?;
+        normalized.push(owner.clone());
         normalized.sort();
         normalized.dedup();
 
@@ -205,6 +226,9 @@ impl GroupBook {
             id: hex::encode(rand::random::<[u8; 8]>()),
             name,
             members: normalized,
+            owner,
+            owner_signing_public_key,
+            revision: 1,
             created_at_unix: now_unix(),
         };
         self.groups.push(group.clone());
@@ -213,8 +237,26 @@ impl GroupBook {
         Ok(group)
     }
 
+    pub fn upsert_group(&mut self, group: GroupRecord) {
+        if let Some(existing) = self
+            .groups
+            .iter_mut()
+            .find(|existing| existing.id == group.id)
+        {
+            *existing = group;
+        } else {
+            self.groups.push(group);
+        }
+        self.groups
+            .sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+    }
+
     pub fn find(&self, group_id: &str) -> Option<&GroupRecord> {
         self.groups.iter().find(|group| group.id == group_id)
+    }
+
+    pub fn find_mut(&mut self, group_id: &str) -> Option<&mut GroupRecord> {
+        self.groups.iter_mut().find(|group| group.id == group_id)
     }
 }
 
@@ -223,4 +265,8 @@ pub fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn default_group_revision() -> u64 {
+    1
 }
