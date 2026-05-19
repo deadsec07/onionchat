@@ -42,10 +42,12 @@
           <article class="card">
             <h2>What It Does</h2>
             <ul>
-              <li>Signed invite export and import for direct contact exchange</li>
-              <li>Direct peer-to-peer messaging over Tor onion services</li>
+              <li>Signed invite export and import with peer encryption keys</li>
+              <li>Direct peer-to-peer messaging over Tor onion services with app-layer encrypted message bodies</li>
               <li>Persistent local identity and peer address book</li>
-              <li>Single-message send, direct terminal chat, and invite-only groups</li>
+              <li>Signed messages with verification on receipt</li>
+              <li>Single-message send, direct terminal chat, and owner-signed private groups</li>
+              <li>Group membership enforcement for received group messages</li>
               <li>Tor control-port integration with SAFECOOKIE support</li>
               <li>Runs on Android through Termux without needing a native app rewrite</li>
             </ul>
@@ -73,6 +75,10 @@
           <p>From another peer:</p>
           <pre><code>./target/release/onionchat invite import alice-invite.json
 ./target/release/onionchat chat &lt;peer_onion&gt;</code></pre>
+          <p>For private groups, the owner can export a signed group definition and members can import it:</p>
+          <pre><code>./target/release/onionchat groups create ops &lt;member_onion&gt;
+./target/release/onionchat groups export &lt;group_id&gt;
+./target/release/onionchat groups import group-&lt;group_id&gt;.json</code></pre>
           <p>Android support is currently through Termux with a local Tor process.</p>
         </section>
 
@@ -81,7 +87,8 @@
             <h2>Threat Model</h2>
             <p>
               onionchat reduces exposure by avoiding central infrastructure and routing
-              transport over Tor. It does not guarantee users are untrackable.
+              transport over Tor. It also signs messages and encrypts message content at the app layer.
+              It does not guarantee users are untrackable.
             </p>
             <p>
               Timing analysis, endpoint compromise, OS compromise, Tor misconfiguration,
